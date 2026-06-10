@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FIFA World Cup Tracker</string>
+    <string name="title_activity_main">FIFA World Cup Tracker</string>
+    <string name="package_name">com.bintu.wc2026tracker</string>
+    <string name="custom_url_scheme">com.bintu.wc2026tracker</string>
+</resources>
