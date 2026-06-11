@@ -152,6 +152,18 @@ body {
   animation: loading 1.5s infinite ease-in-out;
 }
 
+.splash-developer {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-top: 48px;
+  animation: pulse 2s infinite ease-in-out;
+}
+
 /* Views & Navigation */
 .view-container {
   flex: 1;

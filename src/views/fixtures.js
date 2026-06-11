@@ -73,7 +73,7 @@ export function renderFixturesView(container, options = {}) {
       timelineContainer.appendChild(dateHeader);
 
       // Unique ID for auto-scrolling to today
-      const todayString = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      const todayString = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'Asia/Dhaka' });
       if (group.date === todayString) {
         dateHeader.id = 'today-marker';
       }

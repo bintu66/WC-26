@@ -1,5 +1,5 @@
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const BASE_URL = isLocal ? '' : 'https://worldcup26.ir';
+const isLocalBrowser = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port;
+const BASE_URL = isLocalBrowser ? '' : 'https://worldcup26.ir';
 const CACHE_KEY_PREFIX = 'wc26_cache_';
 const CACHE_TTL = 30 * 1000; // 30 seconds for live/dynamic data
 

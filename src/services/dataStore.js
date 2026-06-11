@@ -91,7 +91,7 @@ export const dataStore = {
     if (!dateStr) return 'TBD';
     try {
       const date = new Date(dateStr);
-      return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'Asia/Dhaka' });
     } catch {
       return dateStr;
     }
@@ -101,7 +101,7 @@ export const dataStore = {
     if (!dateStr) return '';
     try {
       const date = new Date(dateStr);
-      return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' }) + ' BST';
     } catch {
       return '';
     }
