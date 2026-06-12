@@ -32,14 +32,39 @@ export function renderMatchCard(match, options = {}) {
   const statusPill = document.createElement('span');
   statusPill.className = 'match-status-pill';
 
+  let tickerInterval = null;
   if (isLive) {
     statusPill.classList.add('status-live');
-    // Show elapsed time from API; we'll also set a live attribute so the ticker can find it
-    const elapsedNum = parseInt(game.time_elapsed);
-    const elapsed = isNaN(elapsedNum) ? game.time_elapsed : elapsedNum;
-    statusPill.dataset.liveMinute = isNaN(elapsedNum) ? 0 : elapsedNum;
-    statusPill.dataset.liveStart = Date.now();
-    statusPill.innerHTML = `<span class="live-dot"></span> LIVE <span class="live-min">${elapsed}'</span>`;
+
+    const getElapsedMinutes = () => {
+      let elapsedNum = parseInt(game.time_elapsed);
+      if (!isNaN(elapsedNum)) return elapsedNum;
+      
+      if (game.date) {
+        const diffMs = Date.now() - new Date(game.date).getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        return Math.max(1, Math.min(120, diffMins));
+      }
+      return 45;
+    };
+
+    const currentMin = getElapsedMinutes();
+    statusPill.innerHTML = `<span class="live-dot"></span> LIVE <span class="live-min">${currentMin}'</span>`;
+
+    tickerInterval = setInterval(() => {
+      const minEl = statusPill.querySelector('.live-min');
+      if (minEl) {
+        minEl.textContent = `${getElapsedMinutes()}'`;
+      }
+    }, 10000);
+
+    const observer = new MutationObserver(() => {
+      if (!document.contains(card)) {
+        clearInterval(tickerInterval);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   } else if (game.finished === 'TRUE') {
     statusPill.classList.add('status-ft');
     statusPill.textContent = 'Full Time';
@@ -95,29 +120,6 @@ export function renderMatchCard(match, options = {}) {
   card.appendChild(header);
   card.appendChild(teamsContainer);
   card.appendChild(footer);
-
-  // ── Live ticker ───────────────────────────────────────────────────────────
-  let tickerInterval = null;
-  if (isLive) {
-    const minEl = statusPill.querySelector('.live-min');
-    let startMinute = parseInt(statusPill.dataset.liveMinute) || 0;
-    const startedAt = parseInt(statusPill.dataset.liveStart) || Date.now();
-
-    tickerInterval = setInterval(() => {
-      const elapsedSinceRender = Math.floor((Date.now() - startedAt) / 60000);
-      const currentMin = startMinute + elapsedSinceRender;
-      if (minEl) minEl.textContent = `${currentMin}'`;
-    }, 15000); // update every 15 seconds
-
-    // Cleanup when card removed from DOM
-    const observer = new MutationObserver(() => {
-      if (!document.contains(card)) {
-        clearInterval(tickerInterval);
-        observer.disconnect();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
 
   if (onCardClick) {
     card.addEventListener('click', () => onCardClick(game));
