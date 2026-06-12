@@ -137,9 +137,74 @@ export const dataStore = {
 
       this.isLoaded = true;
       console.log('[DataStore] Ready. Games:', this.games.length, this.isStale ? '(stale)' : '(fresh)');
+
+      // If we loaded stale or fallback data, trigger background validation
+      if (this.isStale || this.hasError) {
+        this.backgroundRevalidate();
+      }
     } catch (e) {
       console.error('[DataStore] Unhandled init error:', e);
       this.hasError = true;
+    }
+  },
+
+  async backgroundRevalidate() {
+    try {
+      console.log('[DataStore] Starting background live revalidation...');
+      const [teamsRes, groupsRes, gamesRes, stadiumsRes] = await Promise.all([
+        api.fetchEndpointFresh('teams', '/get/teams', 'teams'),
+        api.fetchEndpointFresh('groups', '/get/groups', 'groups'),
+        api.fetchEndpointFresh('games', '/get/games', 'games'),
+        api.fetchEndpointFresh('stadiums', '/get/stadiums', 'stadiums')
+      ]);
+
+      const results = [teamsRes, groupsRes, gamesRes, stadiumsRes];
+      const anyError = results.some(r => r.error);
+      const anyStale = results.some(r => r.stale);
+
+      if (!anyError) {
+        console.log('[DataStore] Background revalidation succeeded! Updating store.');
+        this.hasError = false;
+        this.isStale = anyStale;
+
+        this.teams    = teamsRes.data    || [];
+        this.groups   = groupsRes.data   || [];
+        this.games    = gamesRes.data    || [];
+        this.stadiums = stadiumsRes.data || [];
+
+        // Build lookup maps
+        this.teamMap    = {};
+        this.teamByName = {};
+        this.gameMap    = {};
+        this.stadiumMap = {};
+
+        this.teams.forEach(team => {
+          team.name = team.name_en || team.name;
+          this.teamMap[team._id]     = team;
+          this.teamMap[team.id]      = team;
+          this.teamMap[team.team_id] = team;
+          if (team.name) this.teamByName[team.name.toLowerCase()] = team;
+        });
+
+        this.stadiums.forEach(s => {
+          this.stadiumMap[s.id]  = s;
+          this.stadiumMap[s._id] = s;
+        });
+
+        this.games.forEach(g => {
+          const parsed = parseVenueDate(g.local_date, g.stadium_id, this.stadiumMap);
+          if (parsed) g.date = parsed.toISOString();
+          this.gameMap[g.id] = g;
+        });
+
+        if (window.appInstance) {
+          window.appInstance.onDataUpdated();
+        }
+      } else {
+        console.warn('[DataStore] Background revalidation failed. Keeping current data.');
+      }
+    } catch (e) {
+      console.error('[DataStore] Background revalidation error:', e);
     }
   },
 

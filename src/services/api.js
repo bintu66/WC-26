@@ -28,12 +28,12 @@ function setCachedData(key, data) {
 }
 
 // ── Retry fetch with exponential back-off ─────────────────────────────────────
-async function fetchWithRetry(url, maxAttempts = 3) {
+async function fetchWithRetry(url, maxAttempts = 2) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+      const timeout = setTimeout(() => controller.abort(), 18000); // 18s timeout (API is slow)
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeout);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -41,7 +41,7 @@ async function fetchWithRetry(url, maxAttempts = 3) {
     } catch (err) {
       lastError = err;
       if (attempt < maxAttempts) {
-        // Exponential back-off: 500ms, 1000ms, 2000ms…
+        // Exponential back-off: 500ms, 1000ms…
         await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
         console.warn(`[API] Attempt ${attempt} failed for ${url}. Retrying…`);
       }
@@ -69,12 +69,27 @@ async function getFallbackData(key) {
   return fallback ? fallback[key] : null;
 }
 
-// ── Generic endpoint fetch factory ────────────────────────────────────────────
+// ── Generic endpoint fetch factory (Stale-While-Revalidate pattern) ───────────
 async function fetchEndpoint(key, url, dataKey) {
   // 1. Return fresh cache immediately
   const fresh = getCachedData(key);
   if (fresh) return { data: fresh, stale: false };
 
+  // 2. Return stale cache immediately to prevent page hang, revalidation happens in background
+  const stale = getCachedData(key, { allowStale: true });
+  if (stale) {
+    console.log(`[API] Returning stale cache immediately for "${key}"`);
+    return { data: stale, stale: true };
+  }
+
+  // 3. Return local bundled fallback.json immediately to prevent page hang
+  const fallback = await getFallbackData(key);
+  if (fallback) {
+    console.log(`[API] Returning static fallback immediately for "${key}"`);
+    return { data: fallback, stale: true };
+  }
+
+  // 4. Truly nothing available (e.g. first load, offline, no fallback file), do blocked fetch
   try {
     const json = await fetchWithRetry(`${BASE_URL}${url}`);
     const data = json[dataKey] || json;
@@ -82,22 +97,6 @@ async function fetchEndpoint(key, url, dataKey) {
     return { data, stale: false };
   } catch (error) {
     console.error(`[API] All retries failed for ${url}:`, error);
-    
-    // 2. Fall back to stale cache (up to 24h)
-    const stale = getCachedData(key, { allowStale: true });
-    if (stale) {
-      console.warn(`[API] Returning stale cache for "${key}"`);
-      return { data: stale, stale: true };
-    }
-    
-    // 3. Fall back to local bundled fallback.json
-    console.warn(`[API] Fetching from bundled fallback.json for key "${key}"`);
-    const fallback = await getFallbackData(key);
-    if (fallback) {
-      return { data: fallback, stale: true };
-    }
-    
-    // 4. Truly nothing available
     return { data: [], stale: false, error: true };
   }
 }
@@ -114,6 +113,19 @@ export const api = {
   },
   async fetchStadiums() {
     return fetchEndpoint('stadiums', '/get/stadiums', 'stadiums');
+  },
+
+  /** Direct fresh fetch that bypasses cache and updates it (for background updates) */
+  async fetchEndpointFresh(key, url, dataKey) {
+    try {
+      const json = await fetchWithRetry(`${BASE_URL}${url}`);
+      const data = json[dataKey] || json;
+      setCachedData(key, data);
+      return { data, stale: false };
+    } catch (error) {
+      console.error(`[API] Background revalidation failed for ${url}:`, error);
+      return { data: [], stale: false, error: true };
+    }
   },
 
   /** Clear only the short-lived (live) caches so next fetch is always fresh. */

@@ -21,6 +21,8 @@ class App {
     // Swipe gesture navigation setup
     this.setupSwipeNavigation();
 
+    window.appInstance = this;
+
     this.init();
   }
 
@@ -213,9 +215,14 @@ class App {
   async refreshScores() {
     api.clearLiveCaches();
     await dataStore.init();
+  }
+
+  onDataUpdated() {
     this.updateBanner();
     this.updateLiveBadge();
-    if (this.currentViewInstance && this.currentViewInstance.update) this.currentViewInstance.update();
+    if (this.currentViewInstance && this.currentViewInstance.update) {
+      this.currentViewInstance.update();
+    }
   }
 
   // ── Modal Overlay System ────────────────────────────────────────────────────
