@@ -123,17 +123,7 @@ export function renderHomeView(container, options = {}) {
     // Check if there are live matches
     let featured = dataStore.getFilteredGames('live');
     
-    // If no live matches, get upcoming matches or today's matches
-    if (featured.length === 0) {
-      // Find today's matches based on local date
-      const today = new Date();
-      featured = dataStore.games.filter(g => {
-        const gameDate = new Date(g.date || g.local_date);
-        return gameDate.toDateString() === today.toDateString();
-      });
-    }
-
-    // If still empty, just get the first few uncompleted matches
+    // If no live matches, get upcoming matches (uncompleted)
     if (featured.length === 0) {
       featured = dataStore.games
         .filter(g => g.finished !== 'TRUE')

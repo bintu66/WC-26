@@ -1,101 +1,95 @@
 const isLocalBrowser = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port;
 const BASE_URL = isLocalBrowser ? '' : 'https://worldcup26.ir';
 const CACHE_KEY_PREFIX = 'wc26_cache_';
-const CACHE_TTL = 30 * 1000; // 30 seconds for live/dynamic data
+const CACHE_TTL = 30 * 1000;        // 30 seconds — fresh window
+const CACHE_STALE_MAX = 24 * 60 * 60 * 1000; // 24 hours — max stale age
 
-// Helper for caching API responses in localStorage
-function getCachedData(key) {
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+function getCachedData(key, { allowStale = false } = {}) {
   try {
-    const cached = localStorage.getItem(CACHE_KEY_PREFIX + key);
-    if (!cached) return null;
-    const { data, timestamp } = JSON.parse(cached);
-    if (Date.now() - timestamp < CACHE_TTL) {
-      return data;
-    }
+    const raw = localStorage.getItem(CACHE_KEY_PREFIX + key);
+    if (!raw) return null;
+    const { data, timestamp } = JSON.parse(raw);
+    const age = Date.now() - timestamp;
+    if (age < CACHE_TTL) return data; // fresh
+    if (allowStale && age < CACHE_STALE_MAX) return data; // stale but usable
   } catch (e) {
-    console.error('Cache read error:', e);
+    console.warn('[API] Cache read error:', e);
   }
   return null;
 }
 
 function setCachedData(key, data) {
   try {
-    localStorage.setItem(
-      CACHE_KEY_PREFIX + key,
-      JSON.stringify({ data, timestamp: Date.now() })
-    );
+    localStorage.setItem(CACHE_KEY_PREFIX + key, JSON.stringify({ data, timestamp: Date.now() }));
   } catch (e) {
-    console.error('Cache write error:', e);
+    console.warn('[API] Cache write error:', e);
+  }
+}
+
+// ── Retry fetch with exponential back-off ─────────────────────────────────────
+async function fetchWithRetry(url, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        // Exponential back-off: 500ms, 1000ms, 2000ms…
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+        console.warn(`[API] Attempt ${attempt} failed for ${url}. Retrying…`);
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ── Generic endpoint fetch factory ────────────────────────────────────────────
+async function fetchEndpoint(key, url, dataKey) {
+  // 1. Return fresh cache immediately
+  const fresh = getCachedData(key);
+  if (fresh) return { data: fresh, stale: false };
+
+  try {
+    const json = await fetchWithRetry(`${BASE_URL}${url}`);
+    const data = json[dataKey] || json;
+    setCachedData(key, data);
+    return { data, stale: false };
+  } catch (error) {
+    console.error(`[API] All retries failed for ${url}:`, error);
+    // 2. Fall back to stale cache (up to 24h)
+    const stale = getCachedData(key, { allowStale: true });
+    if (stale) {
+      console.warn(`[API] Returning stale cache for "${key}"`);
+      return { data: stale, stale: true };
+    }
+    // 3. Truly nothing available
+    return { data: [], stale: false, error: true };
   }
 }
 
 export const api = {
   async fetchGroups() {
-    const cached = getCachedData('groups');
-    if (cached) return cached;
-
-    try {
-      const response = await fetch(`${BASE_URL}/get/groups`);
-      if (!response.ok) throw new Error('Failed to fetch groups');
-      const data = await response.json();
-      setCachedData('groups', data.groups || data);
-      return data.groups || data;
-    } catch (error) {
-      console.error('API Error (fetchGroups):', error);
-      // fallback to expired cache if available, or empty list
-      const expired = localStorage.getItem(CACHE_KEY_PREFIX + 'groups');
-      return expired ? JSON.parse(expired).data : [];
-    }
+    return fetchEndpoint('groups', '/get/groups', 'groups');
   },
-
   async fetchTeams() {
-    const cached = getCachedData('teams');
-    if (cached) return cached;
-
-    try {
-      const response = await fetch(`${BASE_URL}/get/teams`);
-      if (!response.ok) throw new Error('Failed to fetch teams');
-      const data = await response.json();
-      setCachedData('teams', data.teams || data);
-      return data.teams || data;
-    } catch (error) {
-      console.error('API Error (fetchTeams):', error);
-      const expired = localStorage.getItem(CACHE_KEY_PREFIX + 'teams');
-      return expired ? JSON.parse(expired).data : [];
-    }
+    return fetchEndpoint('teams', '/get/teams', 'teams');
   },
-
   async fetchGames() {
-    const cached = getCachedData('games');
-    if (cached) return cached;
-
-    try {
-      const response = await fetch(`${BASE_URL}/get/games`);
-      if (!response.ok) throw new Error('Failed to fetch games');
-      const data = await response.json();
-      setCachedData('games', data.games || data);
-      return data.games || data;
-    } catch (error) {
-      console.error('API Error (fetchGames):', error);
-      const expired = localStorage.getItem(CACHE_KEY_PREFIX + 'games');
-      return expired ? JSON.parse(expired).data : [];
-    }
+    return fetchEndpoint('games', '/get/games', 'games');
+  },
+  async fetchStadiums() {
+    return fetchEndpoint('stadiums', '/get/stadiums', 'stadiums');
   },
 
-  async fetchStadiums() {
-    const cached = getCachedData('stadiums');
-    if (cached) return cached;
-
-    try {
-      const response = await fetch(`${BASE_URL}/get/stadiums`);
-      if (!response.ok) throw new Error('Failed to fetch stadiums');
-      const data = await response.json();
-      setCachedData('stadiums', data.stadiums || data);
-      return data.stadiums || data;
-    } catch (error) {
-      console.error('API Error (fetchStadiums):', error);
-      const expired = localStorage.getItem(CACHE_KEY_PREFIX + 'stadiums');
-      return expired ? JSON.parse(expired).data : [];
-    }
+  /** Clear only the short-lived (live) caches so next fetch is always fresh. */
+  clearLiveCaches() {
+    ['groups', 'games'].forEach(k => localStorage.removeItem(CACHE_KEY_PREFIX + k));
   }
 };
