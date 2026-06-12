@@ -50,6 +50,25 @@ async function fetchWithRetry(url, maxAttempts = 3) {
   throw lastError;
 }
 
+// ── Static fallback data loader ──────────────────────────────────────────────
+let fallbackPromise = null;
+async function getFallbackData(key) {
+  if (!fallbackPromise) {
+    fallbackPromise = (async () => {
+      try {
+        const res = await fetch('/data/fallback.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        console.error('[API] Failed to load local fallback.json:', err);
+        return null;
+      }
+    })();
+  }
+  const fallback = await fallbackPromise;
+  return fallback ? fallback[key] : null;
+}
+
 // ── Generic endpoint fetch factory ────────────────────────────────────────────
 async function fetchEndpoint(key, url, dataKey) {
   // 1. Return fresh cache immediately
@@ -63,13 +82,22 @@ async function fetchEndpoint(key, url, dataKey) {
     return { data, stale: false };
   } catch (error) {
     console.error(`[API] All retries failed for ${url}:`, error);
+    
     // 2. Fall back to stale cache (up to 24h)
     const stale = getCachedData(key, { allowStale: true });
     if (stale) {
       console.warn(`[API] Returning stale cache for "${key}"`);
       return { data: stale, stale: true };
     }
-    // 3. Truly nothing available
+    
+    // 3. Fall back to local bundled fallback.json
+    console.warn(`[API] Fetching from bundled fallback.json for key "${key}"`);
+    const fallback = await getFallbackData(key);
+    if (fallback) {
+      return { data: fallback, stale: true };
+    }
+    
+    // 4. Truly nothing available
     return { data: [], stale: false, error: true };
   }
 }

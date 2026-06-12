@@ -93,7 +93,7 @@ export const dataStore = {
 
       // Detect errors / staleness across all endpoints
       const results = [teamsRes, groupsRes, gamesRes, stadiumsRes];
-      const anyError = results.every(r => r.error); // truly empty on ALL
+      const anyError = results.some(r => r.error);
       const anyStale = results.some(r => r.stale);
 
       if (anyError) {
