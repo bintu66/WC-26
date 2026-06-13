@@ -77,12 +77,14 @@ export const dataStore = {
   stadiumMap: {},
 
   isLoaded: false,
-  hasError: false,   // true when ALL retries failed AND no stale cache
-  isStale: false,    // true when we're showing stale (cached) data
+  hasError: false,    // true when ALL retries failed AND no stale cache
+  isStale: false,     // true when showing soft-stale data (<2hr old)
+  isHardFallback: false, // true when network failed AND we're showing >2hr old emergency cache
 
   async init() {
     this.hasError = false;
     this.isStale = false;
+    this.isHardFallback = false;
     try {
       const [teamsRes, groupsRes, gamesRes, stadiumsRes] = await Promise.all([
         api.fetchTeams(),
@@ -93,8 +95,10 @@ export const dataStore = {
 
       // Detect errors / staleness across all endpoints
       const results = [teamsRes, groupsRes, gamesRes, stadiumsRes];
-      const anyError = results.some(r => r.error);
-      const anyStale = results.some(r => r.stale);
+      const anyError   = results.some(r => r.error);
+      const anySoft    = results.some(r => r.stale === 'soft');
+      const anyHard    = results.some(r => r.stale === 'hard');
+      const anyStale   = anySoft || anyHard;
 
       if (anyError) {
         this.hasError = true;
@@ -102,7 +106,11 @@ export const dataStore = {
         if (this.games.length === 0) return;
       }
 
-      if (anyStale) this.isStale = true;
+      // Soft-stale: serve data immediately, trigger background revalidation
+      if (anySoft && !anyHard) this.isStale = true;
+
+      // Hard-stale fallback: network failed and we're showing >2hr old data
+      if (anyHard) this.isHardFallback = true;
 
       this.teams    = teamsRes.data    || [];
       this.groups   = groupsRes.data   || [];
@@ -136,10 +144,11 @@ export const dataStore = {
       });
 
       this.isLoaded = true;
-      console.log('[DataStore] Ready. Games:', this.games.length, this.isStale ? '(stale)' : '(fresh)');
+      const stateLabel = this.isHardFallback ? '(hard-stale fallback!)' : this.isStale ? '(soft-stale)' : '(fresh)';
+      console.log('[DataStore] Ready. Games:', this.games.length, stateLabel);
 
-      // If we loaded stale or fallback data, trigger background validation
-      if (this.isStale || this.hasError) {
+      // Soft-stale: background revalidate so next load is fresh
+      if (this.isStale && !this.isHardFallback) {
         this.backgroundRevalidate();
       }
     } catch (e) {
@@ -160,12 +169,13 @@ export const dataStore = {
 
       const results = [teamsRes, groupsRes, gamesRes, stadiumsRes];
       const anyError = results.some(r => r.error);
-      const anyStale = results.some(r => r.stale);
+      const anyStale = results.some(r => r.stale === 'soft');
 
       if (!anyError) {
         console.log('[DataStore] Background revalidation succeeded! Updating store.');
         this.hasError = false;
         this.isStale = anyStale;
+        this.isHardFallback = false;
 
         this.teams    = teamsRes.data    || [];
         this.groups   = groupsRes.data   || [];

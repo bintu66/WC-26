@@ -1,22 +1,37 @@
 const isLocalBrowser = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port;
 const BASE_URL = isLocalBrowser ? '' : 'https://worldcup26.ir';
 const CACHE_KEY_PREFIX = 'wc26_cache_';
-const CACHE_TTL = 30 * 1000;        // 30 seconds — fresh window
-const CACHE_STALE_MAX = 24 * 60 * 60 * 1000; // 24 hours — max stale age
+
+// ── Cache TTL Tiers ────────────────────────────────────────────────────────────
+// Tier 1 FRESH  : < 5 minutes  → serve immediately, no banner
+// Tier 2 SOFT   : 5min – 2hr   → serve immediately + show "Refreshing…" banner
+// Tier 3 HARD   : > 2 hours    → block on fresh fetch (show skeleton loaders)
+//                                 only fall back to stale if network totally fails
+const CACHE_FRESH_TTL      =  5 * 60 * 1000; //  5 minutes
+const CACHE_SOFT_STALE_MAX =  2 * 60 * 60 * 1000; //  2 hours
+const CACHE_HARD_STALE_MAX = 24 * 60 * 60 * 1000; // 24 hours (absolute max fallback)
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
-function getCachedData(key, { allowStale = false } = {}) {
+/**
+ * Returns cache entry with staleness tier.
+ * @returns {{ data: any, age: number, staleTier: 'fresh'|'soft'|'hard'|null }}
+ */
+function getCachedEntry(key) {
   try {
     const raw = localStorage.getItem(CACHE_KEY_PREFIX + key);
-    if (!raw) return null;
+    if (!raw) return { data: null, age: Infinity, staleTier: null };
     const { data, timestamp } = JSON.parse(raw);
     const age = Date.now() - timestamp;
-    if (age < CACHE_TTL) return data; // fresh
-    if (allowStale && age < CACHE_STALE_MAX) return data; // stale but usable
+    let staleTier;
+    if (age < CACHE_FRESH_TTL)           staleTier = 'fresh';
+    else if (age < CACHE_SOFT_STALE_MAX) staleTier = 'soft';
+    else if (age < CACHE_HARD_STALE_MAX) staleTier = 'hard';
+    else                                  staleTier = null; // too old, ignore
+    return { data, age, staleTier };
   } catch (e) {
     console.warn('[API] Cache read error:', e);
+    return { data: null, age: Infinity, staleTier: null };
   }
-  return null;
 }
 
 function setCachedData(key, data) {
@@ -41,7 +56,6 @@ async function fetchWithRetry(url, maxAttempts = 2) {
     } catch (err) {
       lastError = err;
       if (attempt < maxAttempts) {
-        // Exponential back-off: 500ms, 1000ms…
         await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
         console.warn(`[API] Attempt ${attempt} failed for ${url}. Retrying…`);
       }
@@ -69,34 +83,56 @@ async function getFallbackData(key) {
   return fallback ? fallback[key] : null;
 }
 
-// ── Generic endpoint fetch factory (Stale-While-Revalidate pattern) ───────────
+// ── Generic endpoint fetch factory ────────────────────────────────────────────
+/**
+ * 3-Tier cache strategy:
+ *   FRESH  (<5min)  → { data, stale: false }
+ *   SOFT   (5m-2hr) → { data, stale: 'soft' }   — show data + Refreshing banner
+ *   HARD   (>2hr)   → blocks on fresh fetch, returns { data, stale: false } once done
+ *                      if network fails → { data, stale: 'hard', fromCache: true }
+ *   NONE            → blocks on fetch, returns { data, stale: false } or { error: true }
+ */
 async function fetchEndpoint(key, url, dataKey) {
-  // 1. Return fresh cache immediately
-  const fresh = getCachedData(key);
-  if (fresh) return { data: fresh, stale: false };
+  const cached = getCachedEntry(key);
 
-  // 2. Return stale cache immediately to prevent page hang, revalidation happens in background
-  const stale = getCachedData(key, { allowStale: true });
-  if (stale) {
-    console.log(`[API] Returning stale cache immediately for "${key}"`);
-    return { data: stale, stale: true };
+  // TIER 1: FRESH — return immediately, no banner needed
+  if (cached.staleTier === 'fresh') {
+    return { data: cached.data, stale: false };
   }
 
-  // 3. Return local bundled fallback.json immediately to prevent page hang
-  const fallback = await getFallbackData(key);
-  if (fallback) {
-    console.log(`[API] Returning static fallback immediately for "${key}"`);
-    return { data: fallback, stale: true };
+  // TIER 2: SOFT-STALE — return immediately with soft banner; background revalidate later
+  if (cached.staleTier === 'soft') {
+    const mins = Math.round(cached.age / 60000);
+    console.log(`[API] Soft-stale "${key}" (${mins}m old). Serving now, revalidating in background.`);
+    return { data: cached.data, stale: 'soft' };
   }
 
-  // 4. Truly nothing available (e.g. first load, offline, no fallback file), do blocked fetch
+  // TIER 3: HARD-STALE (>2hr) or NO CACHE — BLOCK on a fresh fetch
+  // We intentionally do NOT flash outdated data; skeletons stay visible until this resolves.
+  const isHard = cached.staleTier === 'hard';
+  if (isHard) {
+    console.log(`[API] Hard-stale "${key}" (>${Math.round(cached.age / 3600000)}h old). Blocking on fresh fetch…`);
+  }
+
   try {
     const json = await fetchWithRetry(`${BASE_URL}${url}`);
     const data = json[dataKey] || json;
     setCachedData(key, data);
     return { data, stale: false };
-  } catch (error) {
-    console.error(`[API] All retries failed for ${url}:`, error);
+  } catch (networkError) {
+    // Network failed — use hard-stale as last resort
+    if (isHard && cached.data) {
+      const ageHours = Math.round(cached.age / 3600000);
+      console.warn(`[API] Network failed for "${key}". Emergency fallback: ${ageHours}h-old cache.`);
+      return { data: cached.data, stale: 'hard', fromCache: true, cacheAge: cached.age };
+    }
+    // Try bundled fallback.json
+    const fallback = await getFallbackData(key);
+    if (fallback) {
+      console.warn(`[API] Network failed for "${key}". Using bundled fallback.json.`);
+      return { data: fallback, stale: 'hard', fromCache: true };
+    }
+    console.error(`[API] All retries failed for ${url}:`, networkError);
     return { data: [], stale: false, error: true };
   }
 }
@@ -115,7 +151,7 @@ export const api = {
     return fetchEndpoint('stadiums', '/get/stadiums', 'stadiums');
   },
 
-  /** Direct fresh fetch that bypasses cache and updates it (for background updates) */
+  /** Direct fresh fetch — bypasses cache; used for background soft-stale revalidation */
   async fetchEndpointFresh(key, url, dataKey) {
     try {
       const json = await fetchWithRetry(`${BASE_URL}${url}`);
@@ -128,8 +164,13 @@ export const api = {
     }
   },
 
-  /** Clear only the short-lived (live) caches so next fetch is always fresh. */
+  /** Clear live/score caches so next fetch is always fresh. */
   clearLiveCaches() {
     ['groups', 'games'].forEach(k => localStorage.removeItem(CACHE_KEY_PREFIX + k));
+  },
+
+  /** Clear ALL caches (for hard manual refresh). */
+  clearAllCaches() {
+    ['groups', 'games', 'teams', 'stadiums'].forEach(k => localStorage.removeItem(CACHE_KEY_PREFIX + k));
   }
 };

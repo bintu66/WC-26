@@ -6,6 +6,7 @@ import { renderHomeView } from './views/home';
 import { renderGroupsView } from './views/groups';
 import { renderFixturesView } from './views/fixtures';
 import { renderBracketView } from './views/bracket';
+import { renderWatchView } from './views/watch';
 import { renderTeamBadge } from './components/teamBadge';
 
 class App {
@@ -32,7 +33,7 @@ class App {
 
     this.viewWrapper.addEventListener('pointerdown', (e) => {
       // Don't trigger if swiping inside bracket-wrapper, group standings table, scrollable chips, or tabs
-      const ignoreSelectors = ['.bracket-wrapper', '.filter-scroll-row', '.group-tabs', '.group-tab-pill', '.modal-tabs', '.modal-tab', '.modal-tab-content'];
+      const ignoreSelectors = ['.bracket-wrapper', '.filter-scroll-row', '.group-tabs', '.group-tab-pill', '.modal-tabs', '.modal-tab', '.modal-tab-content', '.watch-iframe'];
       for (const selector of ignoreSelectors) {
         if (e.target.closest(selector)) return;
       }
@@ -53,10 +54,11 @@ class App {
       this.pointerStartX = undefined;
       this.pointerStartY = undefined;
 
-      // Check for horizontal swipe (swipe length > 80px, vertical deviation < 65px)
+      // Swipe only within the 4 main content tabs (Watch tab excluded — has its own content)
       if (Math.abs(diffX) > 80 && Math.abs(diffY) < 65) {
         const tabsOrder = ['home', 'groups', 'fixtures', 'bracket'];
         const currentIndex = tabsOrder.indexOf(this.activeTab);
+        if (currentIndex === -1) return; // on watch tab, no swipe
         
         if (diffX < 0) {
           // Swipe left -> Next tab
@@ -164,16 +166,24 @@ class App {
   updateBanner() {
     this.bannerSlot.innerHTML = '';
     if (dataStore.hasError) {
+      // Complete failure — no data at all
       const b = document.createElement('div');
       b.className = 'error-banner';
       b.innerHTML = '<span style="font-size:20px">⚠️</span><div class="error-banner-text"><strong>Connection Failed</strong>Could not load match data. Tap to retry.</div>';
       b.addEventListener('click', () => this.refreshScores());
       this.bannerSlot.appendChild(b);
+    } else if (dataStore.isHardFallback) {
+      // Network failed; showing emergency stale data that is >2h old
+      const b = document.createElement('div');
+      b.className = 'error-banner hard-stale-banner';
+      b.innerHTML = '<span style="font-size:20px">⚠️</span><div class="error-banner-text"><strong>Data May Be Outdated</strong>No internet connection. Showing saved data. Tap to retry.</div>';
+      b.addEventListener('click', () => this.refreshScores());
+      this.bannerSlot.appendChild(b);
     } else if (dataStore.isStale) {
+      // Soft-stale: <2hr old, background refresh running
       const b = document.createElement('div');
       b.className = 'error-banner stale-banner';
-      b.innerHTML = '<span style="font-size:20px">📡</span><div class="error-banner-text"><strong>Showing Cached Data</strong>Tap to refresh for latest scores.</div>';
-      b.addEventListener('click', () => this.refreshScores());
+      b.innerHTML = '<span style="font-size:20px">🔄</span><div class="error-banner-text"><strong>Refreshing Scores…</strong>Updating to latest results in background.</div>';
       this.bannerSlot.appendChild(b);
     }
   }
@@ -186,7 +196,7 @@ class App {
 
   handleRouting() {
     const hash = window.location.hash.replace('#', '') || 'home';
-    const validTabs = ['home', 'groups', 'fixtures', 'bracket'];
+    const validTabs = ['home', 'groups', 'fixtures', 'bracket', 'watch'];
     if (!validTabs.includes(hash)) { window.location.hash = 'home'; return; }
 
     if (this.currentViewInstance && this.currentViewInstance.destroy) this.currentViewInstance.destroy();
@@ -206,6 +216,8 @@ class App {
       this.currentViewInstance = renderFixturesView(temp, { onMatchClick: (m) => this.showMatchModal(m) });
     } else if (hash === 'bracket') {
       this.currentViewInstance = renderBracketView(temp, { onMatchClick: (m) => this.showMatchModal(m) });
+    } else if (hash === 'watch') {
+      this.currentViewInstance = renderWatchView(temp);
     }
 
     this.viewWrapper.innerHTML = '';
@@ -215,6 +227,13 @@ class App {
   async refreshScores() {
     api.clearLiveCaches();
     await dataStore.init();
+    this.updateBanner();
+    this.updateLiveBadge();
+    if (this.currentViewInstance && this.currentViewInstance.update) {
+      this.currentViewInstance.update();
+    } else if (this.activeTab === 'home') {
+      this.handleRouting(); // re-render home view with fresh data
+    }
   }
 
   onDataUpdated() {

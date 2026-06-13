@@ -94,6 +94,36 @@ export function renderBottomNav(activeTab, onTabChange) {
           <path d="M16 8 H20 L18 17 C17 18 16 18 16 18 Z" fill="url(#svg-reflection)"/>
         </svg>
       `
+    },
+    {
+      id: 'watch',
+      label: 'Watch',
+      icon: `
+        <svg class="nav-svg" viewBox="0 0 32 32" style="width: 22px; height: 22px;">
+          <defs>
+            <linearGradient id="svg-watch-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF416C"/>
+              <stop offset="100%" stop-color="#FF4B2B"/>
+            </linearGradient>
+            <linearGradient id="svg-watch-screen" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
+            </linearGradient>
+          </defs>
+          <!-- TV body -->
+          <rect x="4" y="8" width="24" height="16" rx="2.5" fill="url(#svg-watch-grad)" filter="url(#svg-shadow)"/>
+          <!-- Screen -->
+          <rect x="6" y="10" width="20" height="12" rx="1.5" fill="url(#svg-watch-screen)"/>
+          <!-- Play triangle -->
+          <polygon points="13,13 13,19 20,16" fill="#ffffff" opacity="0.9"/>
+          <!-- Stand -->
+          <rect x="13" y="24" width="6" height="2.5" rx="1" fill="url(#svg-watch-grad)"/>
+          <rect x="10" y="26.5" width="12" height="2" rx="1" fill="url(#svg-watch-grad)"/>
+          <!-- Live dot -->
+          <circle cx="24" cy="11.5" r="2" fill="#ffffff" opacity="0.9"/>
+          <circle cx="24" cy="11.5" r="1.2" fill="#FF416C"/>
+        </svg>
+      `
     }
   ];
 
